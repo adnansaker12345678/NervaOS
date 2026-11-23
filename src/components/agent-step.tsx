@@ -22,8 +22,9 @@ function TaskCard({ action, live, onToggle, onOpen }: { action: AgentAction; liv
   const snapshot = (action.data?.tasks as TaskSummary[]) ?? [];
   const rows = snapshot.map((item) => ({ item: live.find((task) => task.id === item.id) ?? item, exists: live.some((task) => task.id === item.id) }));
   const done = rows.filter((row) => row.item.completed).length;
+  const complete = rows.length > 0 && done === rows.length;
   return (
-    <div className="step-block task-step">
+    <div className={`step-block task-step ${complete ? "is-complete" : ""}`}>
       <div className="task-step-head">
         <span className="step-badge-icon"><CheckCheck size={15} /></span>
         <span className="step-copy"><strong>{action.title}</strong><small>{done} of {rows.length} done</small></span>
@@ -141,8 +142,10 @@ function AgentStepInner({ action, onOpen, tasks = [], onToggleTask }: { action: 
   if (action.type === "plan" && Array.isArray(action.data?.plan) && (action.data.plan as PlanStep[]).length) {
     const steps = action.data.plan as PlanStep[];
     const doneCount = steps.filter((step) => step.status === "done").length;
+    const isComplete = steps.length > 0 && doneCount === steps.length;
+    const isActive = steps.some((step) => step.status === "active");
     return (
-      <div className="step-block plan-step">
+      <div className={`step-block plan-step ${isActive ? "is-running" : ""} ${isComplete ? "is-complete" : ""}`}>
         <div className="plan-head">
           <span className="step-badge-icon plan-icon"><ListChecks size={15} /></span>
           <span className="step-copy"><strong>{action.title}</strong><small>{action.detail}</small></span>

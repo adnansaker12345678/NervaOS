@@ -66,7 +66,7 @@ export const SKILL_CATALOG: SkillGroup[] = [
     skills: [
       { name: "Web search", blurb: "Search and actually read the best pages.", example: "Who won the 2022 FIFA World Cup final?", icon: Globe },
       { name: "Browser", blurb: "A real Chromium the agent drives.", example: "Open example.com in your browser", icon: Compass },
-      { name: "Terminal", blurb: "A private file sandbox with files.", example: "Use the terminal to list my files", icon: Terminal },
+      { name: "Terminal", blurb: "Keyless cloud Linux shell with pip/npm installs, git clone, & Direct Linux VM.", example: "Use the terminal to run uname -a && pip install tabulate && python3 -c \"from tabulate import tabulate; print(tabulate([['Aura', 'Live']]))\"", icon: Terminal },
     ],
   },
   {

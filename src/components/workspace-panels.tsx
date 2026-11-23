@@ -166,30 +166,54 @@ function HelpPanel(props: PanelProps) {
   return <Modal title="A little help goes a long way" subtitle="One conversation. A whole lot of possibility." onClose={props.onClose} className="help-modal"><div className="help-intro"><div className="help-aura-mark"><AuraMark size={35} /></div><p>No maze of menus. Tell Aura what you need, and let your agent connect the dots.</p></div><div className="capability-grid">{ideas.map(({ icon: Icon, color, title, text, prompt }) => <button key={title} onClick={() => props.onPrompt(prompt)}><span className={`capability-icon ${color}`}><Icon size={20} /></span><h3>{title}</h3><p>{text}</p><ArrowRight size={16} className="capability-arrow" /></button>)}</div><div className="shortcuts"><h4><Keyboard size={16} />A few little shortcuts</h4><div><span>A fresh conversation</span><kbd>⌘ / Ctrl K</kbd></div><div><span>Find a conversation</span><kbd>⌘ / Ctrl /</kbd></div><div><span>A new line in chat</span><kbd>Shift Enter</kbd></div><div><span>Close a panel</span><kbd>Esc</kbd></div></div><div className="modal-bottom-note"><ShieldCheck size={14} />Actions are real. Your changes are saved. You’re always in control.</div></Modal>;
 }
 
-type TermLine = { kind: "in" | "out" | "err"; text: string };
+type TermLine = { kind: "in" | "out" | "err"; text: string; engine?: string };
+const DIRECT_VMS = [
+  { id: "jslinux", label: "JSLinux · Alpine Root", url: "https://bellard.org/jslinux/vm.html?url=alpine-x86.cfg&mem=192", hint: "Direct root Alpine Linux VM in browser (apk add packages, C compiler, shell)" },
+  { id: "v86", label: "v86 · Arch Linux", url: "https://copy.sh/v86/?profile=archlinux", hint: "Full x86 Arch Linux VM running directly in browser (root shell, pacman, networking)" },
+] as const;
+
 function TerminalPanel(props: PanelProps) {
-  const [lines, setLines] = useState<TermLine[]>([{ kind: "out", text: "Aura terminal — a private shell over this workspace's own files. It cannot reach the server. Type help to begin." }]);
+  const [mode, setMode] = useState<"sandbox" | "vm">("sandbox");
+  const [vmId, setVmId] = useState<(typeof DIRECT_VMS)[number]["id"]>("jslinux");
+  const [vmNonce, setVmNonce] = useState(0);
+  const [lines, setLines] = useState<TermLine[]>([
+    { kind: "out", text: "Aura Virtual Linux Terminal — keyless cloud sandboxes (Wandbox · Paiza.io · Codapi) with persistent workspace sync.\nSupports pip install, npm init/install, git clone, curl, bash pipes/&&, python3, node, sqlite3.\nNeed root apt/apk packages? Switch to the Direct Linux VM tab above." },
+  ]);
   const [command, setCommand] = useState("");
   const [cwd, setCwd] = useState("/");
+  const [engineLabel, setEngineLabel] = useState("Wandbox · Paiza.io · Codapi");
   const [busy, setBusy] = useState(false);
   const past = useRef<string[]>([]);
   const cursor = useRef(-1);
   const logRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    api<{ cwd: string }>("/api/terminal").then((data) => setCwd(data.cwd)).catch(() => undefined);
+    api<{ cwd: string; remote?: { engines?: { label: string; available: boolean }[] } }>("/api/terminal")
+      .then((data) => {
+        setCwd(data.cwd);
+        const ready = data.remote?.engines?.filter((item) => item.available).map((item) => item.label.split(" · ")[0]);
+        if (ready?.length) setEngineLabel(ready.join(" · "));
+      })
+      .catch(() => undefined);
   }, []);
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [lines]);
   const run = async (event: FormEvent) => {
     event.preventDefault();
     const line = command.trim();
     if (!line || busy) return;
-    setCommand(""); setBusy(true);
+    setCommand("");
     past.current.unshift(line); cursor.current = -1;
+    if (line === "clear") {
+      setLines([]);
+      return;
+    }
+    setBusy(true);
     setLines((prev) => [...prev, { kind: "in", text: `${cwd} $ ${line}` }]);
     try {
-      const result = await api<{ ok: boolean; output: string; cwd: string; changed: boolean }>("/api/terminal", { method: "POST", body: JSON.stringify({ command: line }) });
+      const result = await api<{ ok: boolean; output: string; cwd: string; changed: boolean; engine?: string }>("/api/terminal", { method: "POST", body: JSON.stringify({ command: line }) });
       setCwd(result.cwd);
-      if (result.output) setLines((prev) => [...prev, { kind: result.ok ? "out" : "err", text: result.output }]);
+      if (result.output) {
+        setLines((prev) => [...prev, { kind: result.ok ? "out" : "err", text: result.output, engine: result.engine }]);
+      }
     } catch (error) {
       setLines((prev) => [...prev, { kind: "err", text: (error as Error).message }]);
     } finally { setBusy(false); }
@@ -206,14 +230,32 @@ function TerminalPanel(props: PanelProps) {
       setCommand(next >= 0 ? past.current[next] : "");
     }
   };
-  return <Modal drawer title="Terminal" subtitle="A private, sandboxed shell over this workspace's own files." onClose={props.onClose} className="terminal-panel">
-    <div className="terminal-body" ref={logRef} aria-live="polite">{lines.map((line, index) => <pre key={index} className={`term-line ${line.kind}`}>{line.text}</pre>)}</div>
-    <form className="terminal-input" onSubmit={run}>
-      <span className="terminal-prompt">{cwd} $</span>
-      <input data-autofocus aria-label="Terminal command" value={command} disabled={busy} onChange={(event) => setCommand(event.target.value)} onKeyDown={history} placeholder="type help" spellCheck={false} autoComplete="off" />
-      <button className="primary-button" disabled={busy || !command.trim()}>{busy ? <LoaderCircle size={14} className="spin" /> : "Run"}</button>
-    </form>
-    <div className="drawer-tip"><Terminal size={15} /><span>Try <strong>mkdir notes</strong>, then <strong>write notes/ideas.txt "First thought"</strong>, then <strong>cat notes/ideas.txt</strong>.</span></div>
+  const activeVm = DIRECT_VMS.find((v) => v.id === vmId) ?? DIRECT_VMS[0];
+  return <Modal drawer title="Virtual Linux Terminal" subtitle={mode === "sandbox" ? `Keyless cloud sandbox (${engineLabel}) synced with your workspace.` : activeVm.hint} onClose={props.onClose} className={`terminal-panel ${mode === "vm" ? "vm-wide" : ""}`}>
+    <div className="filter-tabs terminal-mode-tabs" role="tablist" aria-label="Terminal mode">
+      <button type="button" role="tab" aria-selected={mode === "sandbox"} className={mode === "sandbox" ? "active" : ""} onClick={() => setMode("sandbox")}><Terminal size={13} />Cloud Sandbox</button>
+      <button type="button" role="tab" aria-selected={mode === "vm"} className={mode === "vm" ? "active" : ""} onClick={() => setMode("vm")}><Server size={13} />Direct Linux VM</button>
+      {mode === "vm" && <div className="vm-switcher">
+        {DIRECT_VMS.map((vm) => (
+          <button key={vm.id} type="button" className={`vm-choice ${vmId === vm.id ? "selected" : ""}`} onClick={() => setVmId(vm.id)}>{vm.label}</button>
+        ))}
+        <IconButton label="Reload Linux VM" onClick={() => setVmNonce((n) => n + 1)}><RefreshCw size={14} /></IconButton>
+      </div>}
+    </div>
+    {mode === "sandbox" ? <>
+      <div className="terminal-body" ref={logRef} aria-live="polite">{lines.map((line, index) => <pre key={index} className={`term-line ${line.kind}`}>{line.engine && line.engine !== "workspace" ? `[${line.engine}]\n` : ""}{line.text}</pre>)}</div>
+      <form className="terminal-input" onSubmit={run}>
+        <span className="terminal-prompt">{cwd} $</span>
+        <input data-autofocus aria-label="Terminal command" value={command} disabled={busy} onChange={(event) => setCommand(event.target.value)} onKeyDown={history} placeholder="pip install tabulate, npm install ms, uname -a, or help" spellCheck={false} autoComplete="off" />
+        <button className="primary-button" disabled={busy || !command.trim()}>{busy ? <LoaderCircle size={14} className="spin" /> : "Run"}</button>
+      </form>
+      <div className="drawer-tip"><Terminal size={15} /><span>Try <strong>pip install tabulate</strong>, <strong>npm install ms</strong>, or <strong>curl -s https://api.github.com/zen</strong>.</span></div>
+    </> : <>
+      <div className="vm-frame-wrap">
+        <iframe key={`${activeVm.id}-${vmNonce}`} className="vm-frame" src={activeVm.url} title={activeVm.label} referrerPolicy="no-referrer" allow="clipboard-read; clipboard-write" />
+      </div>
+      <div className="drawer-tip"><Server size={15} /><span>Interactive root Linux VM runs locally inside your browser (no key needed). Use <strong>Cloud Sandbox</strong> to share files with Aura&apos;s AI agent.</span></div>
+    </>}
   </Modal>;
 }
 

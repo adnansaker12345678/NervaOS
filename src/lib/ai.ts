@@ -62,17 +62,17 @@ export function providers(): EngineProvider[] {
 
   const free = { keyless: true, vision: false, rpm: 2, windowMs: 65_000, firstByteMs: 10_000, maxTokens: 1600 };
   const keyless: EngineProvider[] = [
-    // Strongest & fastest tool-calling models first, backed by APIsFreeLLM (independent gateway, 5 req/min) so the pool never stalls.
-    { ...free, rpm: 1, id: "ovh-qwen35-397b", label: "Qwen 3.5 397B", endpoint: OVH, model: "Qwen3.5-397B-A17B", extraBody: { reasoning_effort: "none" }, note: "Ultra-fast verified OVH MoE engine (~0.4s first token)." },
+    // Independent healthy gateways first so shared-IP OVH rate limits never stall chat or spam failures.
+    { keyless: true, vision: false, rpm: 5, windowMs: 62_000, firstByteMs: 10_000, maxTokens: 1600, id: "apisfreellm", label: "APIsFreeLLM", endpoint: APISFREE, model: "free-ai", note: "Independent keyless gateway (~5 req/min burst, sub-second start)." },
+    { ...free, id: "pollinations", label: "Pollinations GPT-OSS", endpoint: "https://text.pollinations.ai/openai", model: "openai-fast", rpm: 1, windowMs: 35_000, firstByteMs: 25_000, extraBody: { reasoning_effort: "low" }, note: "Independent keyless fallback gateway." },
+    { ...free, rpm: 1, id: "ovh-qwen35-397b", label: "Qwen 3.5 397B", endpoint: OVH, model: "Qwen3.5-397B-A17B", extraBody: { reasoning_effort: "none" }, note: "Fast verified OVH MoE engine (~0.4s first token)." },
     { ...free, id: "ovh-gpt-oss-120b", label: "GPT-OSS 120B", endpoint: OVH, model: "gpt-oss-120b", extraBody: { reasoning_effort: "low" }, note: "Fast verified OVH engine: first words in about a second." },
     { ...free, id: "ovh-mistral-small", label: "Mistral Small 3.2", endpoint: OVH, model: "Mistral-Small-3.2-24B-Instruct-2506", note: "Fast verified OVH engine." },
     { ...free, id: "ovh-qwen36", label: "Qwen 3.6 27B", endpoint: OVH, model: "Qwen3.6-27B", extraBody: { reasoning_effort: "none" }, note: "Fast verified OVH engine." },
     { ...free, id: "ovh-llama-70b", label: "Llama 3.3 70B", endpoint: OVH, model: "Meta-Llama-3_3-70B-Instruct", note: "Fast verified OVH engine." },
-    { keyless: true, vision: false, rpm: 5, windowMs: 62_000, firstByteMs: 8_000, maxTokens: 1600, id: "apisfreellm", label: "APIsFreeLLM", endpoint: APISFREE, model: "free-ai", note: "Independent keyless gateway (~5 req/min burst, sub-second start)." },
     { ...free, id: "ovh-gpt-oss-20b", label: "GPT-OSS 20B", endpoint: OVH, model: "gpt-oss-20b", extraBody: { reasoning_effort: "low" }, note: "Fast verified OVH engine." },
     { ...free, id: "ovh-qwen38", label: "Qwen 3.8 27B", endpoint: OVH, model: "Qwen3.8-27B", extraBody: { reasoning_effort: "none" }, note: "Fast verified OVH engine." },
     { ...free, rpm: 1, id: "ovh-qwen35-9b", label: "Qwen 3.5 9B", endpoint: OVH, model: "Qwen3.5-9B", extraBody: { reasoning_effort: "none" }, note: "Fast lightweight OVH engine." },
-    { ...free, id: "pollinations", label: "Pollinations GPT-OSS", endpoint: "https://text.pollinations.ai/openai", model: "openai-fast", rpm: 1, windowMs: 46_000, firstByteMs: 40_000, lastResort: true, extraBody: { reasoning_effort: "low" }, note: "Last-resort gateway: one reply every 45 seconds." },
   ];
   return [...configured, ...keyless];
 }
@@ -82,7 +82,13 @@ const EXHAUSTED_MS = 60 * 60_000;
 
 export class RateLimitError extends Error {
   seconds: number;
-  constructor(seconds: number) { super(`Free engine cooling down for ${seconds}s.`); this.name = "RateLimitError"; this.seconds = Math.max(3, Math.ceil(seconds)); }
+  rawSeconds: number;
+  constructor(seconds: number, rawSeconds = seconds) {
+    super(`Free engine cooling down for ${seconds}s.`);
+    this.name = "RateLimitError";
+    this.seconds = Math.max(3, Math.ceil(seconds));
+    this.rawSeconds = Math.max(this.seconds, Math.ceil(rawSeconds));
+  }
 }
 export class EngineError extends Error {
   fatal: boolean;
@@ -91,13 +97,17 @@ export class EngineError extends Error {
   constructor(message: string, fatal = false, cooldownMs = 0) { super(message); this.name = "EngineError"; this.fatal = fatal; this.cooldownMs = cooldownMs; }
 }
 
-type State = { until: Record<string, number>; hits: Record<string, number[]> };
-const globalForEngine = globalThis as typeof globalThis & { __auraEngineState2?: State };
-const engineState = globalForEngine.__auraEngineState2 ?? (globalForEngine.__auraEngineState2 = { until: {}, hits: {} });
+type State = { until: Record<string, number>; hostUntil: Record<string, number>; hits: Record<string, number[]> };
+const globalForEngine = globalThis as typeof globalThis & { __auraEngineState3?: State };
+const engineState = globalForEngine.__auraEngineState3 ?? (globalForEngine.__auraEngineState3 = { until: {}, hostUntil: {}, hits: {} });
 
-/** When this engine can next be called: after any cooldown, and once its free-tier window has room. */
+function providerHost(provider: EngineProvider): string {
+  try { return new URL(provider.endpoint).hostname; } catch { return provider.id; }
+}
+
+/** When this engine can next be called: after any cooldown, host backoff, and free-tier window room. */
 function availableAt(provider: EngineProvider, now = Date.now()): number {
-  let at = engineState.until[provider.id] || 0;
+  let at = Math.max(engineState.until[provider.id] || 0, engineState.hostUntil[providerHost(provider)] || 0);
   if (provider.rpm > 0) {
     const recent = (engineState.hits[provider.id] ?? []).filter((time) => now - time < provider.windowMs);
     engineState.hits[provider.id] = recent;
@@ -147,11 +157,12 @@ export function engineInfo(): EngineInfo {
   };
 }
 
-function retrySeconds(headers: Headers, body: string) {
+function retryInfo(headers: Headers, body: string) {
   const fromBody = body.match(/retry after\s*(\d+)/i)?.[1];
   const fromHeader = headers.get("retry-after")?.match(/\d+/)?.[0];
   const value = Number(fromBody || fromHeader || 45);
-  return Number.isFinite(value) ? Math.min(180, Math.max(3, value)) : 45;
+  const rawSeconds = Number.isFinite(value) ? Math.max(3, Math.ceil(value)) : 45;
+  return { seconds: Math.min(180, rawSeconds), rawSeconds };
 }
 
 const ID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -207,7 +218,8 @@ async function attempt(provider: EngineProvider, messages: ChatMessage[], tools:
     if (/insufficient_quota|no credits|credit balance|billing|exhausted/i.test(text)) {
       throw new EngineError(`${provider.label} has no credits left.`, false, EXHAUSTED_MS);
     }
-    throw new RateLimitError(retrySeconds(response.headers, text));
+    const { seconds, rawSeconds } = retryInfo(response.headers, text);
+    throw new RateLimitError(seconds, rawSeconds);
   }
   if (response.status === 401 || response.status === 403) {
     clearTimeout(timer);
@@ -363,10 +375,22 @@ function race(order: EngineProvider[], messages: ChatMessage[], tools: unknown[]
           inFlight -= 1;
           if (error instanceof LostRace) return;
           lastError = error instanceof Error ? error : new EngineError("The backend AI engine failed unexpectedly.");
-          console.info(`[aura-engine] ${provider.id} failed after ${Date.now() - started}ms: ${lastError.message.slice(0, 90)}`);
-          if (winner === provider.id || (error instanceof EngineError && error.fatal)) { finish(() => reject(lastError)); return; }
-          if (error instanceof RateLimitError) engineState.until[provider.id] = Date.now() + error.seconds * 1000;
-          else engineState.until[provider.id] = Date.now() + (error instanceof EngineError && error.cooldownMs ? error.cooldownMs : 20_000);
+          if (winner === provider.id || (error instanceof EngineError && error.fatal)) {
+            console.info(`[aura-engine] ${provider.id} stopped after ${Date.now() - started}ms: ${lastError.message.slice(0, 90)}`);
+            finish(() => reject(lastError));
+            return;
+          }
+          if (error instanceof RateLimitError) {
+            engineState.until[provider.id] = Date.now() + error.seconds * 1000;
+            if (error.rawSeconds >= 300) {
+              // Multi-minute/multi-day Retry-After indicates an IP/host quota block; back off the whole host.
+              engineState.hostUntil[providerHost(provider)] = Date.now() + 30 * 60_000;
+            }
+            console.info(`[aura-engine] ${provider.id} resting (${error.seconds}s) after ${Date.now() - started}ms; rotating`);
+          } else {
+            engineState.until[provider.id] = Date.now() + (error instanceof EngineError && error.cooldownMs ? error.cooldownMs : 20_000);
+            console.info(`[aura-engine] ${provider.id} skipped after ${Date.now() - started}ms: ${lastError.message.slice(0, 90)}`);
+          }
           if (settled || winner) return;
           launch(false);
         });

@@ -893,7 +893,7 @@ export async function runTool(name: string, args: Args, context: Context, action
     }
   }
   if (name === "terminal") {
-    const command = text(args.command, 1000);
+    const command = text(args.command, 4000);
     const result = await runTerminal({ workspaceId: context.workspace.id, command, explicitDelete: wantsDelete(context) });
     context.emit({
       type: "action",
@@ -901,12 +901,12 @@ export async function runTool(name: string, args: Args, context: Context, action
         id: actionId,
         type: "terminal",
         title: command ? `$ ${command}` : "Terminal",
-        detail: result.cwd,
+        detail: result.engine && result.engine !== "workspace" ? `${result.cwd} · ${result.engine}` : result.cwd,
         status: result.ok ? "done" : "error",
-        data: { output: result.output, ok: result.ok, panel: "terminal" },
+        data: { output: result.output, ok: result.ok, engine: result.engine, panel: "terminal" },
       },
     });
-    return { ok: result.ok, cwd: result.cwd, output: result.output };
+    return { ok: result.ok, cwd: result.cwd, engine: result.engine, output: result.output };
   }
   const fail = (type: AgentAction["type"], detail: string, panel?: string) => {
     context.emit({ type: "action", action: { id: actionId, type, title: describeStep(name), detail, status: "error", ...(panel ? { data: { panel } } : {}) } });
@@ -1063,9 +1063,9 @@ ${planningLine}${planningExtra}
 - Every tool call automatically appears inline in the chat timeline with its command and live output right where you called it. After inspecting tool results, either invoke the next tool needed or write your clear analysis and final summary right below the output (without repeating long raw outputs verbatim).
 - Answer greetings, small talk, opinions, writing requests, and general knowledge directly, with no tool call. Tools are for live data and for changing the workspace.
 - Only say an action happened when a tool result confirmed it. Never invent results, links, or file contents; when you use a web page, cite its URL.
-${has("terminal") ? "- Terminal: Aura's terminal is a private, sandboxed shell over this workspace's own files (ls, cd, mkdir, cat, head, wc, write, append, touch, grep, rm, echo, date, calc). It cannot run programs, reach the server, or use pipes. For real computation in chat, prefer calculate or js_run.\n" : ""}${has("browser_open") ? "- You have a real Chromium browser (browser_open, browser_act, browser_close). Use it when the user asks you to visit a site, look at a page, follow links, fill a field, or take a screenshot. Work step by step: open, read the returned text and links, then click or type. Every page you visit shows the user a screenshot. It is ephemeral: no logins, saved cookies, payments, or downloads, and it cannot bypass captchas or paywalls; tell the user rather than guessing. Keep the session open across steps; only call browser_close when asked or when the task is finished. If the browser can't start, fall back to web_search and web_fetch and say so.\n" : ""}- Searching: whenever a question depends on current or factual information (news, prices, scores, statistics, people, places, dates, "latest", "today", "who/what/where"), call web_search FIRST — never answer such things from memory. Set freshness="day" for today/breaking/result questions, "week" for recent news, "month" for anything you suspect changed recently, "any" only for timeless facts. Results start with dated headlines (Google News) and include full articles: lead with the newest dated facts, state the date your answer reflects (e.g. "as of 21 Nov 2026"), and cite 2-4 URLs you actually used.
+${has("terminal") ? "- Terminal: Aura has a hybrid virtual Linux terminal connected to free keyless cloud sandbox servers (Wandbox Ubuntu Linux / Paiza.io / Codapi) with persistent workspace file sync. Simple workspace commands (pwd, cd, ls, cat, write, calc) stay instant; package installation (pip install for pure-Python PyPI wheels into /site-packages, npm init/install into node_modules), public downloads (curl, wget, git clone), Linux tools (uname -a, whoami, ls -la, find, awk, sed, grep, sort, gcc), pipes (|), redirects (> >>), chaining (&& ;), heredocs, python3, node, and sqlite3 execute cleanly and sync created/updated files back to the user's workspace.\n" : ""}${has("browser_open") ? "- You have a real Chromium browser (browser_open, browser_act, browser_close). Use it when the user asks you to visit a site, look at a page, follow links, fill a field, or take a screenshot. Work step by step: open, read the returned text and links, then click or type. Every page you visit shows the user a screenshot. It is ephemeral: no logins, saved cookies, payments, or downloads, and it cannot bypass captchas or paywalls; tell the user rather than guessing. Keep the session open across steps; only call browser_close when asked or when the task is finished. If the browser can't start, fall back to web_search and web_fetch and say so.\n" : ""}- Searching: whenever a question depends on current or factual information (news, prices, scores, statistics, people, places, dates, "latest", "today", "who/what/where"), call web_search FIRST — never answer such things from memory. Set freshness="day" for today/breaking/result questions, "week" for recent news, "month" for anything you suspect changed recently, "any" only for timeless facts. Results start with dated headlines (Google News) and include full articles: lead with the newest dated facts, state the date your answer reflects (e.g. "as of 21 Nov 2026"), and cite 2-4 URLs you actually used.
 - Cite the sources you actually used with their full URLs (2-4 of them). If the sources are thin, old, or disagree, say so plainly. Never present a snippet as if it were the whole article.
-- You cannot open a real server shell, use email, or see images. You cannot search the whole web; read only URLs you have.
+- Terminal commands run in an external ephemeral cloud Linux sandbox (never on Aura's host server); you cannot use email, see images without vision, or search the whole web without URLs.
 - Tasks: when the user asks to add, set, or be reminded of something to do, call create_tasks. Work out the due date from the local date below ("tomorrow" is the next local day) and pass it as due. A due date only shows in the task list; there are no alerts or notifications, so say that if the user expects a reminder.
 - Memory: when the user says "remember…" or shares a lasting personal fact, call memory_remember. Use remembered facts to personalize. Only forget when explicitly asked.
 - Never show internal ids or raw timestamps to the user. Mention due dates in plain words.

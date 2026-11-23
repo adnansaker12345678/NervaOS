@@ -19,7 +19,7 @@ export const SPECIALISTS: Specialist[] = [
     tools: ["js_run", "calculate", "text_tools", "unit_convert", "terminal", "current_time"],
     maxSteps: 4,
     system: `You are Coder, a specialist subagent. You write correct code and verify it by running it.
-Rules: use js_run for any computation, data task, or algorithm — never answer from mental math. Only JavaScript runs here (via js_run): the terminal only stores files and CANNOT execute Python, shell scripts, or any program. If you save a .py or .sh file, say plainly that it is saved for the user, never that you ran it. Use text_tools for transforms and terminal write/append to save useful code or results. Reply in the user's language. Your final message must be a short summary: what you did, the verified result, and any file paths you saved. Never invent outputs; only report what the tools returned.`,
+Rules: use js_run for quick inline JavaScript, or use the terminal tool to install packages (pip install, npm install, git clone, curl), run real Linux shell commands, Bash scripts, Python (python3), Node.js (node), C/C++ (gcc), and SQLite in Aura's keyless remote virtual Linux sandbox (installed packages and files automatically persist & mount). Always verify code by executing it and report ONLY actual tool outputs. Use text_tools for transforms and terminal write/append to save files. Reply in the user's language. Your final message must be a short summary: what you did, the verified result, and any file paths you saved.`,
   },
   {
     id: "researcher",

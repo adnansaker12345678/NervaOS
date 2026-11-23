@@ -172,11 +172,22 @@ export function AssistantReply(props: ReplyProps) {
             </div>
             <div className="reply-meta">
               <span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
-              {meta && (meta.engine
-                ? <span className="meta-chip" title={meta.model ?? undefined}><Cpu size={11} />{meta.engine}</span>
-                : <span className="meta-chip instant" title="Done by Aura's built-in actions. No AI request was sent."><Zap size={11} />Instant · no AI</span>)}
-              {meta && meta.steps > 0 && <span className="meta-chip"><Layers size={11} />{meta.steps} {meta.steps === 1 ? "step" : "steps"}</span>}
-              {meta && <span className="meta-chip"><Timer size={11} />{formatDuration(meta.durationMs)}</span>}
+              {meta && (
+                <>
+                  <span className="meta-dot" aria-hidden="true">·</span>
+                  {meta.engine
+                    ? <span className="meta-item" title={meta.model ?? undefined}><Cpu size={11} />{meta.engine}</span>
+                    : <span className="meta-item instant" title="Done by Aura's built-in actions. No AI request was sent."><Zap size={11} />Instant</span>}
+                  {meta.steps > 0 && (
+                    <>
+                      <span className="meta-dot" aria-hidden="true">·</span>
+                      <span className="meta-item"><Layers size={11} />{meta.steps} {meta.steps === 1 ? "step" : "steps"}</span>
+                    </>
+                  )}
+                  <span className="meta-dot" aria-hidden="true">·</span>
+                  <span className="meta-item"><Timer size={11} />{formatDuration(meta.durationMs)}</span>
+                </>
+              )}
             </div>
           </div>
         )}
